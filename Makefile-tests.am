@@ -1,4 +1,4 @@
-include $(top_srcdir)/buildutil/glib-tap.mk
+include $(top_srcdir)/buildutil/glib-tap.mk 
 
 CLEANFILES += \
 	tests/setup-session.sh \
