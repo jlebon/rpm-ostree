@@ -26,7 +26,7 @@ dockerwait:
 buildimg: dockerwait
 	docker build -t $(BUILDER_IMG) -f Dockerfile.builder .
 
-build: dockerwait
+build: buildimg
 	if ! test -f ../configure; then \
 	  $(BUILDER_RUN) env NOCONFIGURE=1 ./autogen.sh; \
 	fi
@@ -52,5 +52,5 @@ ofsinstall: build
 check: build
 	$(BUILDER_RUN) make check
 
-clean:
+clean: buildimg
 	$(BUILDER_RUN) make clean
