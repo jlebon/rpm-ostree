@@ -1,5 +1,5 @@
 AC_PREREQ([2.63])
-AC_INIT([rpm-ostree], [2016.3], [walters@verbum.org])
+AC_INIT([rpm-ostree], [2016.4], [walters@verbum.org])
 AC_CONFIG_HEADER([config.h])
 AC_CONFIG_MACRO_DIR([buildutil])
 AC_CONFIG_AUX_DIR([build-aux])
@@ -62,7 +62,7 @@ AC_SEARCH_LIBS([rpmsqSetInterruptSafety], [rpmio],
 # Remember to update AM_CPPFLAGS in Makefile.am when bumping GIO req.
 PKG_CHECK_MODULES(PKGDEP_GIO_UNIX, [gio-unix-2.0])
 PKG_CHECK_MODULES(PKGDEP_RPMOSTREE, [gio-unix-2.0 >= 2.40.0 json-glib-1.0
-				     ostree-1 >= 2015.1 libgsystem >= 2015.1
+				     ostree-1 >= 2016.7 libgsystem >= 2015.1
 				     libsystemd
 				     rpm librepo
 				     libarchive])
@@ -95,6 +95,12 @@ AC_ARG_ENABLE(installed_tests,
                              [Install test programs (default: no)]),,
               [enable_installed_tests=no])
 AM_CONDITIONAL(BUILDOPT_INSTALL_TESTS, test x$enable_installed_tests = xyes)
+
+AC_ARG_WITH(bubblewrap,
+              AS_HELP_STRING([--with-bubblewrap],
+                             [Path to bubblewrap binary (default: /usr/bin/bwrap)]),,
+              [with_bubblewrap=/usr/bin/bwrap])
+AC_DEFINE_UNQUOTED(WITH_BUBBLEWRAP_PATH, ["$with_bubblewrap"], [Define to bubblewrap path])
 
 dnl Some distributions may want to support the client tooling, but not
 dnl the server side.
@@ -143,5 +149,6 @@ echo "
     $PACKAGE $VERSION
 
     compose tooling:	$enable_compose_tooling
+    bubblewrap:         $with_bubblewrap
     gtk-doc:            $enable_gtk_doc
 "

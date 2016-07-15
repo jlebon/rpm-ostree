@@ -1,15 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-# prepare ssh connection
-vagrant ssh-config > ssh-config
-echo "  ControlMaster auto" >> ssh-config
-echo "  ControlPath $PWD/ssh.sock" >> ssh-config
-echo "  ControlPersist yes" >> ssh-config
-export SSH="ssh -F $PWD/ssh-config vmcheck"
-export SCP="scp -F $PWD/ssh-config"
-
 . ${commondir}/libvm.sh
+
+# create ssh-config if needed and export cmds
+vm_setup
 
 # stand up ssh connection and sanity check that it all works
 if ! vm_ssh_wait 20; then
@@ -81,16 +76,19 @@ for tf in $(find . -name 'test-*.sh' | sort); do
 
     # do some dirty piping to get some instant feedback and help debugging
     if ${tf} |& tee -a ${LOG} \
-            | grep -e '^ok' --line-buffered \
+            | grep -e '^ok ' --line-buffered \
             | xargs -d '\n' -n 1 echo "  "; then
         pass_print "PASS: $bn"
+        echo "PASS" >> ${LOG}
         let "pass += 1"
     else
         if test $? = 77; then
             skip_print "SKIP: $bn"
+            echo "SKIP" >> ${LOG}
             let "skip += 1"
         else
             fail_print "FAIL: $bn"
+            echo "FAIL" >> ${LOG}
             let "fail += 1"
         fi
     fi
@@ -109,8 +107,10 @@ for tf in $(find . -name 'test-*.sh' | sort); do
     fi
 done
 
-# tear down ssh connection
-$SSH -O exit &>/dev/null
+# tear down ssh connection if needed
+if $SSH -O check &>/dev/null; then
+    $SSH -O exit &>/dev/null
+fi
 
 [ ${fail} -eq 0 ] && printer=pass || printer=fail
 ${printer}_print "TOTAL: $total PASS: $pass SKIP: $skip FAIL: $fail"

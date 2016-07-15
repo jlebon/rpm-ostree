@@ -17,6 +17,28 @@
 # Free Software Foundation, Inc., 59 Temple Place - Suite 330,
 # Boston, MA 02111-1307, USA.
 
+# prepares the VM and library for action
+vm_setup() {
+  # If there's already an ssh-config, just use that one. The user might have
+  # created it for a self-provisioned machine. Otherwise, let's just assume
+  # we're using vagrant and generate an ssh-config.
+  if [ ! -f ssh-config ]; then
+    vagrant ssh-config > "${topsrcdir}/ssh-config"
+  fi
+  echo "  ControlMaster auto" >> "${topsrcdir}/ssh-config"
+  echo "  ControlPath ${topsrcdir}/ssh.sock" >> "${topsrcdir}/ssh-config"
+  echo "  ControlPersist yes" >> "${topsrcdir}/ssh-config"
+  export SSH="ssh -F ${topsrcdir}/ssh-config vmcheck"
+  export SCP="scp -F ${topsrcdir}/ssh-config"
+}
+
+vm_rsync() {
+  pushd ${topsrcdir}
+  rsync -az --no-owner --no-group --filter ":- .gitignore" \
+    -e "ssh -F ssh-config" --exclude .git/ . vmcheck:/root/sync
+  popd
+}
+
 # run command in vm
 # - $@    command to run
 vm_cmd() {
