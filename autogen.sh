@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/sh 
 set -e
 
 test -n "$srcdir" || srcdir=`dirname "$0"`
