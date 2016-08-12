@@ -1,5 +1,5 @@
 Raw build instructions  
-----------------------
+---------------------- 
 
 First, releases are available as GPG signed git tags, and most recent
 versions support extended validation using
