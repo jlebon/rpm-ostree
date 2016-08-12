@@ -2,7 +2,7 @@ Raw build instructions
 ---------------------- 
 
 First, releases are available as GPG signed git tags, and most recent
-versions support extended validation using
+versions support extended validation using 
 [git-evtag](https://github.com/cgwalters/git-evtag).
 
 You'll need to get the submodules too: `git submodule update --init`
