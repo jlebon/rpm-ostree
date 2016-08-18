@@ -1,4 +1,4 @@
-libexec_PROGRAMS += rpm-ostreed
+libexec_PROGRAMS += rpm-ostreed 
 
 dbus_built_sources = rpm-ostreed-generated.h rpm-ostreed-generated.c
 
