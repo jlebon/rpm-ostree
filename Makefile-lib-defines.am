@@ -1,6 +1,6 @@
 # Shared variables between toplevel Makefile.am and doc/Makefile.am
 # ...since gtk-doc forces use of recursive make =(
-#
+#  
 # Copyright (C) 2013 Colin Walters <walters@verbum.org>
 #
 # This library is free software; you can redistribute it and/or
