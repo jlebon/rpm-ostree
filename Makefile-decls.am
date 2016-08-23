@@ -49,4 +49,4 @@ GITIGNOREFILES =
 
 # This is a special facility to chain together hooks easily
 INSTALL_DATA_HOOKS =
-install-data-hook: $(INSTALL_DATA_HOOKS)
+install-data-hook: $(INSTALL_DATA_HOOKS) 
