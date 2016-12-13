@@ -1,4 +1,4 @@
-Raw build instructions
+Raw build instructions  
 ----------------------
 
 First, releases are available as GPG signed git tags, and most recent
@@ -14,7 +14,7 @@ consume this as a git submodule automatically.
 We also require a few other libraries like
 [librepo](https://github.com/rpm-software-management/librepo).
 
-So the build process now looks like any other autotools program:
+So the build process now looks like any other autotools program: 
 
 ```
 env NOCONFIGURE=1 ./autogen.sh
