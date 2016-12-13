@@ -18,7 +18,7 @@ CLEANFILES += rpm-ostreed-generated-org.projectatomic.rpmostree1.OS.xml \
 	rpm-ostreed-generated-org.projectatomic.rpmostree1.Transaction.xml \
 	$(NULL)
 
-noinst_LTLIBRARIES += librpmostreed.la
+noinst_LTLIBRARIES += librpmostreed.la 
 nodist_librpmostreed_la_SOURCES = $(dbus_built_sources)
 
 librpmostreed_la_SOURCES = \
