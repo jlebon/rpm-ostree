@@ -31,7 +31,7 @@ Using the Vagrant box
 The easiest way to get started hacking on `rpm-ostree` is to
 use the vagrant machine. This is also the set up used for
 our integration tests.
-
+ 
 One-time setup
 ==============
 
