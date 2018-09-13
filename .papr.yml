@@ -2,6 +2,7 @@ branches:
     - master
     - auto
     - try
+    - reuse-rpmdb
 
 context: f28-codestyle
 
@@ -110,6 +111,7 @@ branches:
   - master
   - auto
   - try
+  - reuse-rpmdb
 
 # NB: when bumping 28 here, also bump fedora.repo, and compose script
 
@@ -161,6 +163,7 @@ branches:
   - master
   - auto
   - try
+  - reuse-rpmdb
 
 context: f28-ex-container
 build: false
