@@ -615,6 +615,7 @@ vm_ostree_repo_commit_layered_as_base() {
   rm -rf $d
   vm_cmd ostree checkout --repo=$repo -H --fsync=no $from_rev $d
   # need to update the base rpmdb
+  vm_cmd mkdir -p $d/usr/lib/sysimage/rpm-ostree-base-db
   vm_cmd rsync -qa --delete $d/usr/share/rpm/ $d/usr/lib/sysimage/rpm-ostree-base-db
   vm_cmd ostree commit --repo=$repo -b $to_ref --link-checkout-speedup --fsync=no --consume $d
   # and inject pkglist metadata
