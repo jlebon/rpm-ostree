@@ -86,23 +86,21 @@ invalidate_changed_cacheids (RpmOstreeContext     *self,
                              GCancellable         *cancellable,
                              GError              **error)
 {
-  GLNX_AUTO_PREFIX_ERROR ("During rojig pkgcache invalidation", error);
+  GLNX_AUTO_PREFIX_ERROR ("During rojig repo cache invalidation", error);
 
-  OstreeRepo *pkgcache_repo = self->pkgcache_repo ?: self->ostreerepo;
   const char *cacheid;
   g_variant_get (pkg_objid_to_xattrs, "(&s@a(su))", &cacheid, NULL);
   /* See if we have it cached */
   g_autofree char *rojig_branch = rpmostree_get_rojig_branch_pkg (pkg);
   g_autofree char *cached_rev = NULL;
-  if (!ostree_repo_resolve_rev (pkgcache_repo, rojig_branch, TRUE,
-                                &cached_rev, error))
+  if (!ostree_repo_resolve_rev (self->repo, rojig_branch, TRUE, &cached_rev, error))
     return FALSE;
   /* Not cached?  That's fine, on to the next */
   if (!cached_rev)
     return TRUE; /* Early return */
 
   g_autoptr(GVariant) commit = NULL;
-  if (!ostree_repo_load_commit (pkgcache_repo, cached_rev, &commit, NULL, error))
+  if (!ostree_repo_load_commit (self->repo, cached_rev, &commit, NULL, error))
     return FALSE;
   g_autoptr(GVariant) metadata = g_variant_get_child_value (commit, 0);
   g_autoptr(GVariantDict) metadata_dict = g_variant_dict_new (metadata);
@@ -110,7 +108,7 @@ invalidate_changed_cacheids (RpmOstreeContext     *self,
   g_variant_dict_lookup (metadata_dict, "rpmostree.rojig_cacheid", "&s", &current_cacheid);
   if (g_strcmp0 (current_cacheid, cacheid))
     {
-      if (!ostree_repo_set_ref_immediate (pkgcache_repo, NULL, rojig_branch, NULL,
+      if (!ostree_repo_set_ref_immediate (self->repo, NULL, rojig_branch, NULL,
                                           cancellable, error))
         return FALSE;
       (*out_n_invalidated)++;
@@ -134,7 +132,6 @@ rpmostree_context_execute_rojig (RpmOstreeContext     *self,
                                  GCancellable         *cancellable,
                                  GError              **error)
 {
-  OstreeRepo *repo = self->ostreerepo;
   DnfPackage* oirpm_pkg = rpmostree_context_get_rojig_pkg (self);
   const char *provided_commit = rpmostree_context_get_rojig_checksum (self);
 
@@ -142,12 +139,12 @@ rpmostree_context_execute_rojig (RpmOstreeContext     *self,
 
   { OstreeRepoCommitState commitstate;
     gboolean has_commit;
-    if (!ostree_repo_has_object (repo, OSTREE_OBJECT_TYPE_COMMIT, provided_commit,
+    if (!ostree_repo_has_object (self->repo, OSTREE_OBJECT_TYPE_COMMIT, provided_commit,
                                  &has_commit, cancellable, error))
       return FALSE;
     if (has_commit)
       {
-        if (!ostree_repo_load_commit (repo, provided_commit, NULL,
+        if (!ostree_repo_load_commit (self->repo, provided_commit, NULL,
                                       &commitstate, error))
           return FALSE;
         if (!(commitstate & OSTREE_REPO_COMMIT_STATE_PARTIAL))
@@ -231,26 +228,26 @@ rpmostree_context_execute_rojig (RpmOstreeContext     *self,
   g_printerr ("TODO implement GPG verification\n");
 
   g_auto(RpmOstreeRepoAutoTransaction) txn = { 0, };
-  if (!rpmostree_repo_auto_transaction_start (&txn, repo, FALSE, cancellable, error))
+  if (!rpmostree_repo_auto_transaction_start (&txn, self->repo, FALSE, cancellable, error))
     return FALSE;
 
-  if (!ostree_repo_write_commit_detached_metadata (repo, checksum, commit_meta,
+  if (!ostree_repo_write_commit_detached_metadata (self->repo, checksum, commit_meta,
                                                    cancellable, error))
     return FALSE;
   /* Mark as partial until we're done */
-  if (!ostree_repo_mark_commit_partial (repo, checksum, TRUE, error))
+  if (!ostree_repo_mark_commit_partial (self->repo, checksum, TRUE, error))
     return FALSE;
   { g_autofree guint8*csum = NULL;
-    if (!ostree_repo_write_metadata (repo, OSTREE_OBJECT_TYPE_COMMIT,
+    if (!ostree_repo_write_metadata (self->repo, OSTREE_OBJECT_TYPE_COMMIT,
                                      checksum, commit, &csum,
                                      cancellable, error))
       return FALSE;
   }
 
-  if (!rpmostree_rojig_assembler_write_new_objects (rojig, repo, cancellable, error))
+  if (!rpmostree_rojig_assembler_write_new_objects (rojig, self->repo, cancellable, error))
     return FALSE;
 
-  if (!ostree_repo_commit_transaction (repo, NULL, cancellable, error))
+  if (!ostree_repo_commit_transaction (self->repo, NULL, cancellable, error))
     return FALSE;
   txn.initialized = FALSE;
 
@@ -312,7 +309,7 @@ rpmostree_context_execute_rojig (RpmOstreeContext     *self,
   /* Last thing is to delete the partial marker, just like
    * ostree_repo_pull_with_options().
    */
-  if (!ostree_repo_mark_commit_partial (repo, checksum, FALSE, error))
+  if (!ostree_repo_mark_commit_partial (self->repo, checksum, FALSE, error))
     return FALSE;
 
   *out_changed = TRUE;

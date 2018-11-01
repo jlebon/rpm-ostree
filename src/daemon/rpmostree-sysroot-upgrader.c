@@ -819,8 +819,8 @@ finalize_overlays (RpmOstreeSysrootUpgrader *self,
           g_autofree char *path =
             g_strdup_printf ("%s/%s.rpm", self->metatmpdir.path, nevra);
 
-          if (!rpmostree_pkgcache_find_pkg_header (self->repo, nevra, sha256,
-                                                   &header, cancellable, error))
+          if (!rpmostree_find_pkg_header (self->repo, nevra, sha256,
+                                          &header, cancellable, error))
             return FALSE;
 
           if (!glnx_file_replace_contents_at (AT_FDCWD, path,
@@ -913,7 +913,7 @@ prepare_context_for_assembly (RpmOstreeSysrootUpgrader *self,
   rpmostree_context_set_sepolicy (self->ctx, sepolicy);
 
   if (self->flags & RPMOSTREE_SYSROOT_UPGRADER_FLAGS_PKGCACHE_ONLY)
-    rpmostree_context_set_pkgcache_only (self->ctx, TRUE);
+    rpmostree_context_set_cached_only (self->ctx, TRUE);
 
   return TRUE;
 }

@@ -77,8 +77,8 @@ RpmOstreeContext *rpmostree_context_new_tree (int basedir_dfd,
                                               GCancellable *cancellable,
                                               GError **error);
 
-void rpmostree_context_set_pkgcache_only (RpmOstreeContext *self,
-                                          gboolean          pkgcache_only);
+void rpmostree_context_set_cached_only (RpmOstreeContext *self,
+                                        gboolean          cache_only);
 
 typedef enum {
       RPMOSTREE_CONTEXT_DNF_CACHE_FOREVER,
@@ -116,9 +116,6 @@ rpmostree_context_configure_from_deployment (RpmOstreeContext *self,
 
 void rpmostree_context_set_is_empty (RpmOstreeContext *self);
 
-void rpmostree_context_set_repos (RpmOstreeContext *self,
-                                  OstreeRepo       *base_repo,
-                                  OstreeRepo       *pkgcache_repo);
 void rpmostree_context_set_devino_cache (RpmOstreeContext *self,
                                          OstreeRepoDevInoCache *devino_cache);
 void rpmostree_context_disable_rofiles (RpmOstreeContext *self);
@@ -127,7 +124,7 @@ void rpmostree_context_set_sepolicy (RpmOstreeContext *self,
 
 gboolean rpmostree_dnf_add_checksum_goal (GChecksum  *checksum,
                                           HyGoal      goal,
-                                          OstreeRepo *pkgcache_repo,
+                                          OstreeRepo *repo,
                                           GError    **error);
 
 gboolean rpmostree_context_get_state_sha512 (RpmOstreeContext *self,
@@ -135,12 +132,12 @@ gboolean rpmostree_context_get_state_sha512 (RpmOstreeContext *self,
                                              GError          **error);
 
 gboolean
-rpmostree_pkgcache_find_pkg_header (OstreeRepo    *pkgcache,
-                                    const char    *nevra,
-                                    const char    *expected_sha256,
-                                    GVariant     **out_header,
-                                    GCancellable  *cancellable,
-                                    GError       **error);
+rpmostree_find_pkg_header (OstreeRepo    *repo,
+                           const char    *nevra,
+                           const char    *expected_sha256,
+                           GVariant     **out_header,
+                           GCancellable  *cancellable,
+                           GError       **error);
 
 gboolean rpmostree_context_download_metadata (RpmOstreeContext  *context,
                                               DnfContextSetupSackFlags flags,

@@ -271,7 +271,7 @@ install_packages (RpmOstreeTreeComposeContext  *self,
           rpmostree_context_set_devino_cache (self->corectx, self->devino_cache);
         }
 
-      rpmostree_context_set_repos (self->corectx, self->repo, self->pkgcache_repo);
+      //rpmostree_context_set_repos (self->corectx, self->repo, self->pkgcache_repo);
     }
 
   if (!rpmostree_context_prepare (self->corectx, cancellable, error))

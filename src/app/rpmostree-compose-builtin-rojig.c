@@ -156,7 +156,7 @@ install_packages (RpmOstreeRojigCompose  *self,
                                                cancellable, error);
   if (!self->pkgcache_repo)
     return FALSE;
-  rpmostree_context_set_repos (self->corectx, self->repo, self->pkgcache_repo);
+  //rpmostree_context_set_repos (self->corectx, self->repo, self->pkgcache_repo);
   self->devino_cache = ostree_repo_devino_cache_new ();
   rpmostree_context_set_devino_cache (self->corectx, self->devino_cache);
 

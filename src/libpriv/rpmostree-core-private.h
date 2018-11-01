@@ -41,11 +41,10 @@ struct _RpmOstreeContext {
   char *rojig_checksum;
   char *rojig_inputhash;
 
-  gboolean pkgcache_only;
+  gboolean cached_only;
+  OstreeRepo *repo;
   DnfContext *dnfctx;
   RpmOstreeContextDnfCachePolicy dnf_cache_policy;
-  OstreeRepo *ostreerepo;
-  OstreeRepo *pkgcache_repo;
   gboolean enable_rofiles;
   OstreeRepoDevInoCache *devino_cache;
   gboolean unprivileged;

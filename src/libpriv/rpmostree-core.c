@@ -47,8 +47,6 @@
 #define RPMOSTREE_MESSAGE_PKG_REPOS SD_ID128_MAKE(0e,ea,67,9b,bf,a3,4d,43,80,2d,ec,99,b2,74,eb,e7)
 #define RPMOSTREE_MESSAGE_PKG_IMPORT SD_ID128_MAKE(df,8b,b5,4f,04,fa,47,08,ac,16,11,1b,bf,4b,a3,52)
 
-static OstreeRepo * get_pkgcache_repo (RpmOstreeContext *self);
-
 /* Given a string, look for ostree:// or rojig:// prefix and
  * return its type and the remainder of the string.  Note
  * that ostree:// can be either a refspec (TYPE_OSTREE) or
@@ -347,8 +345,7 @@ rpmostree_context_finalize (GObject *object)
   g_free (rctx->rojig_checksum);
   g_free (rctx->rojig_inputhash);
 
-  g_clear_object (&rctx->pkgcache_repo);
-  g_clear_object (&rctx->ostreerepo);
+  g_clear_object (&rctx->repo);
   g_clear_pointer (&rctx->devino_cache, (GDestroyNotify)ostree_repo_devino_cache_unref);
 
   g_clear_object (&rctx->sepolicy);
@@ -406,7 +403,7 @@ rpmostree_context_new_system (OstreeRepo   *repo,
 
   RpmOstreeContext *self = g_object_new (RPMOSTREE_TYPE_CONTEXT, NULL);
   self->is_system = TRUE;
-  self->ostreerepo = g_object_ref (repo);
+  self->repo = g_object_ref (repo);
 
   /* We can always be control-c'd at any time; this is new API,
    * otherwise we keep calling _rpmostree_reset_rpm_sighandlers() in
@@ -485,13 +482,14 @@ rpmostree_context_ensure_tmpdir (RpmOstreeContext *self,
   return TRUE;
 }
 
+/* Only use packages already imported to the repo, not from yum repos. */
 void
-rpmostree_context_set_pkgcache_only (RpmOstreeContext *self,
-                                     gboolean          pkgcache_only)
+rpmostree_context_set_cached_only (RpmOstreeContext *self,
+                                   gboolean          cached_only)
 {
   /* if called, must always be before setup() */
   g_assert (!self->spec);
-  self->pkgcache_only = pkgcache_only;
+  self->cached_only = cached_only;
 }
 
 void
@@ -526,22 +524,6 @@ void
 rpmostree_context_set_is_empty (RpmOstreeContext *self)
 {
   self->empty = TRUE;
-}
-
-/* XXX: or put this in new_system() instead? */
-void
-rpmostree_context_set_repos (RpmOstreeContext *self,
-                             OstreeRepo       *base_repo,
-                             OstreeRepo       *pkgcache_repo)
-{
-  g_set_object (&self->ostreerepo, base_repo);
-  g_set_object (&self->pkgcache_repo, pkgcache_repo);
-}
-
-static OstreeRepo *
-get_pkgcache_repo (RpmOstreeContext *self)
-{
-  return self->pkgcache_repo ?: self->ostreerepo;
 }
 
 /* I debated making this part of the treespec. Overall, I think it makes more
@@ -741,8 +723,8 @@ rpmostree_context_setup (RpmOstreeContext    *self,
   if (!dnf_context_setup (self->dnfctx, cancellable, error))
     return FALSE;
 
-  /* disable all repos in pkgcache-only mode, otherwise obey "repos" key */
-  if (self->pkgcache_only)
+  /* disable all repos in cached-only mode, otherwise obey "repos" key */
+  if (self->cached_only)
     {
       if (!context_repos_enable_only (self, NULL, error))
         return FALSE;
@@ -756,7 +738,7 @@ rpmostree_context_setup (RpmOstreeContext    *self,
     }
 
   g_autoptr(GPtrArray) repos = get_enabled_rpmmd_repos (self->dnfctx, DNF_REPO_ENABLED_PACKAGES);
-  if (repos->len == 0 && !self->pkgcache_only)
+  if (repos->len == 0 && !self->cached_only)
     {
       /* To be nice, let's only make this fatal if "packages" is empty (e.g. if
        * we're only installing local RPMs. Missing deps will cause the regular
@@ -962,10 +944,9 @@ checkout_pkg_metadata_by_dnfpkg (RpmOstreeContext *self,
 {
   const char *nevra = dnf_package_get_nevra (pkg);
   g_autofree char *cachebranch = rpmostree_get_cache_branch_pkg (pkg);
-  OstreeRepo *pkgcache_repo = get_pkgcache_repo (self);
   g_autoptr(GVariant) header = NULL;
 
-  if (!get_header_variant (pkgcache_repo, cachebranch, &header,
+  if (!get_header_variant (self->repo, cachebranch, &header,
                            cancellable, error))
     return FALSE;
 
@@ -973,12 +954,12 @@ checkout_pkg_metadata_by_dnfpkg (RpmOstreeContext *self,
 }
 
 gboolean
-rpmostree_pkgcache_find_pkg_header (OstreeRepo    *pkgcache,
-                                    const char    *nevra,
-                                    const char    *expected_sha256,
-                                    GVariant     **out_header,
-                                    GCancellable  *cancellable,
-                                    GError       **error)
+rpmostree_find_pkg_header (OstreeRepo    *repo,
+                           const char    *nevra,
+                           const char    *expected_sha256,
+                           GVariant     **out_header,
+                           GCancellable  *cancellable,
+                           GError       **error)
 {
   g_autofree char *cache_branch = NULL;
   if (!rpmostree_nevra_to_cache_branch (nevra, &cache_branch, error))
@@ -990,10 +971,10 @@ rpmostree_pkgcache_find_pkg_header (OstreeRepo    *pkgcache,
       g_autoptr(GVariant) commit = NULL;
       g_autofree char *actual_sha256 = NULL;
 
-      if (!ostree_repo_resolve_rev (pkgcache, cache_branch, TRUE, &commit_csum, error))
+      if (!ostree_repo_resolve_rev (repo, cache_branch, TRUE, &commit_csum, error))
         return FALSE;
 
-      if (!ostree_repo_load_commit (pkgcache, commit_csum, &commit, NULL, error))
+      if (!ostree_repo_load_commit (repo, commit_csum, &commit, NULL, error))
         return FALSE;
 
       if (!get_commit_header_sha256 (commit, &actual_sha256, error))
@@ -1003,7 +984,7 @@ rpmostree_pkgcache_find_pkg_header (OstreeRepo    *pkgcache,
         return glnx_throw (error, "Checksum mismatch for package %s", nevra);
     }
 
-  return get_header_variant (pkgcache, cache_branch, out_header, cancellable, error);
+  return get_header_variant (repo, cache_branch, out_header, cancellable, error);
 }
 
 static gboolean
@@ -1015,8 +996,7 @@ checkout_pkg_metadata_by_nevra (RpmOstreeContext *self,
 {
   g_autoptr(GVariant) header = NULL;
 
-  if (!rpmostree_pkgcache_find_pkg_header (get_pkgcache_repo (self), nevra, sha256,
-                                           &header, cancellable, error))
+  if (!rpmostree_find_pkg_header (self->repo, nevra, sha256, &header, cancellable, error))
     return FALSE;
 
   return checkout_pkg_metadata (self, nevra, header, cancellable, error);
@@ -1042,7 +1022,7 @@ rpmostree_context_download_metadata (RpmOstreeContext *self,
   g_autoptr(GPtrArray) rpmmd_repos =
     get_enabled_rpmmd_repos (self->dnfctx, DNF_REPO_ENABLED_PACKAGES);
 
-  if (self->pkgcache_only)
+  if (self->cached_only)
     {
       /* we already disabled all the repos in setup */
       g_assert_cmpint (rpmmd_repos->len, ==, 0);
@@ -1215,10 +1195,10 @@ commit_has_matching_sepolicy (GVariant       *commit,
 }
 
 static gboolean
-get_pkgcache_repodata_chksum_repr (GVariant    *commit,
-                                   char       **out_chksum_repr,
-                                   gboolean     allow_noent,
-                                   GError     **error)
+get_repodata_chksum_repr (GVariant    *commit,
+                          char       **out_chksum_repr,
+                          gboolean     allow_noent,
+                          GError     **error)
 {
   g_autofree char *chksum_repr = NULL;
   g_autoptr(GError) tmp_error = NULL;
@@ -1244,7 +1224,7 @@ commit_has_matching_repodata_chksum_repr (GVariant    *commit,
                                           GError     **error)
 {
   g_autofree char *chksum_repr = NULL;
-  if (!get_pkgcache_repodata_chksum_repr (commit, &chksum_repr, TRUE, error))
+  if (!get_repodata_chksum_repr (commit, &chksum_repr, TRUE, error))
     return FALSE;
 
   /* never match pkgs unpacked with older versions that didn't embed chksum_repr */
@@ -1274,9 +1254,9 @@ pkg_is_cached (DnfPackage *pkg)
   return g_file_test (dnf_package_get_filename (pkg), G_FILE_TEST_EXISTS);
 }
 
-/* Given @pkg, return its state in the pkgcache repo. It could be not present,
- * or present but have been imported with a different SELinux policy version
- * (and hence in need of relabeling).
+/* Given @pkg, return its state in the repo. It could be not present, or present
+ * but have been imported with a different SELinux policy version (and hence in
+ * need of relabeling).
  */
 static gboolean
 find_pkg_in_ostree (RpmOstreeContext *self,
@@ -1286,32 +1266,30 @@ find_pkg_in_ostree (RpmOstreeContext *self,
                     gboolean       *out_selinux_match,
                     GError        **error)
 {
-  OstreeRepo *repo = get_pkgcache_repo (self);
   /* Init output here, since we have several early returns */
   *out_in_ostree = FALSE;
   /* If there's no sepolicy, then we always match */
   *out_selinux_match = (sepolicy == NULL);
 
-  /* NB: we're not using a pkgcache yet in the compose path */
-  if (repo == NULL)
+  /* NB: we're not using a pkgcache in the legacy compose path */
+  if (self->repo == NULL)
     return TRUE; /* Note early return */
 
   g_autofree char *cachebranch = self->rojig_spec ?
       rpmostree_get_rojig_branch_pkg (pkg) : rpmostree_get_cache_branch_pkg (pkg);
   g_autofree char *cached_rev = NULL;
-  if (!ostree_repo_resolve_rev (repo, cachebranch, TRUE,
-                                &cached_rev, error))
+  if (!ostree_repo_resolve_rev (self->repo, cachebranch, TRUE, &cached_rev, error))
     return FALSE;
 
   if (!cached_rev)
     return TRUE; /* Note early return */
 
   /* Below here prefix with the branch */
-  const char *errprefix = glnx_strjoina ("Loading pkgcache branch ", cachebranch);
+  const char *errprefix = glnx_strjoina ("Loading branch ", cachebranch);
   GLNX_AUTO_PREFIX_ERROR (errprefix, error);
 
   g_autoptr(GVariant) commit = NULL;
-  if (!ostree_repo_load_commit (repo, cached_rev, &commit, NULL, error))
+  if (!ostree_repo_load_commit (self->repo, cached_rev, &commit, NULL, error))
     return FALSE;
   g_assert (commit);
   g_autoptr(GVariant) metadata = g_variant_get_child_value (commit, 0);
@@ -1346,14 +1324,14 @@ find_pkg_in_ostree (RpmOstreeContext *self,
       g_variant_dict_lookup (self->spec->dict, "documentation", "b", &global_docs);
       const gboolean global_nodocs = !global_docs;
 
-      gboolean pkgcache_commit_is_nodocs;
-      if (!g_variant_dict_lookup (metadata_dict, "rpmostree.nodocs", "b", &pkgcache_commit_is_nodocs))
-        pkgcache_commit_is_nodocs = FALSE;
+      gboolean commit_is_nodocs;
+      if (!g_variant_dict_lookup (metadata_dict, "rpmostree.nodocs", "b", &commit_is_nodocs))
+        commit_is_nodocs = FALSE;
 
       /* We treat a mismatch of documentation state as simply not being
        * imported at all.
        */
-      if (global_nodocs != pkgcache_commit_is_nodocs)
+      if (global_nodocs != commit_is_nodocs)
         return TRUE;
     }
 
@@ -1646,9 +1624,9 @@ install_pkg_from_cache (RpmOstreeContext *self,
 
   /* This is the great lie: we make libdnf et al. think that they're dealing with a full
    * RPM, all while crossing our fingers that they don't try to look past the header.
-   * Ideally, it would be best if libdnf could learn to treat the pkgcache repo as another
-   * DnfRepo. We could do this all in-memory though it doesn't seem like libsolv has an
-   * appropriate API for this. */
+   * Ideally, it would be best if libdnf could learn to treat the repo as another DnfRepo.
+   * We could do this all in-memory though it doesn't seem like libsolv has an appropriate
+   * API for this. */
   g_autofree char *rpm = g_strdup_printf ("%s/metarpm/%s.rpm", self->tmpdir.path, nevra);
   DnfPackage *pkg = dnf_sack_add_cmdline_package (dnf_context_get_sack (self->dnfctx), rpm);
   if (!pkg)
@@ -1658,25 +1636,24 @@ install_pkg_from_cache (RpmOstreeContext *self,
   return TRUE;
 }
 
-/* This is a hacky way to bridge the gap between libdnf and our pkgcache. We extract the
+/* This is a hacky way to bridge the gap between libdnf and our cached pkgs. We extract the
  * metarpm for every RPM in our cache and present that as the cmdline repo to libdnf. But we
  * do still want all the niceties of the libdnf stack, e.g. HyGoal, libsolv depsolv, etc...
  */
 static gboolean
-add_remaining_pkgcache_pkgs (RpmOstreeContext *self,
+add_remaining_cached_pkgs (RpmOstreeContext *self,
                              GHashTable       *already_added,
                              GCancellable     *cancellable,
                              GError          **error)
 {
-  OstreeRepo *pkgcache_repo = get_pkgcache_repo (self);
-  g_assert (pkgcache_repo);
-  g_assert (self->pkgcache_only);
+  g_assert (self->repo);
+  g_assert (self->cached_only);
 
   DnfSack *sack = dnf_context_get_sack (self->dnfctx);
   g_assert (sack);
 
   g_autoptr(GHashTable) refs = NULL;
-  if (!ostree_repo_list_refs_ext (pkgcache_repo, "rpmostree/pkg", &refs,
+  if (!ostree_repo_list_refs_ext (self->repo, "rpmostree/pkg", &refs,
                                   OSTREE_REPO_LIST_REFS_EXT_NONE, cancellable, error))
     return FALSE;
 
@@ -1687,7 +1664,7 @@ add_remaining_pkgcache_pkgs (RpmOstreeContext *self,
         continue;
 
       g_autoptr(GVariant) header = NULL;
-      if (!get_header_variant (pkgcache_repo, ref, &header, cancellable, error))
+      if (!get_header_variant (self->repo, ref, &header, cancellable, error))
         return FALSE;
 
       if (!checkout_pkg_metadata (self, nevra, header, cancellable, error))
@@ -1902,9 +1879,9 @@ rpmostree_context_prepare (RpmOstreeContext *self,
    * replace & local pkgs since they already handle a subset of the cached pkgs and have
    * SHA256 checks. But we do it *before* dnf_context_install() since those subjects are not
    * directly linked to a cached pkg, so we need to teach libdnf about them beforehand. */
-  if (self->pkgcache_only)
+  if (self->cached_only)
     {
-      if (!add_remaining_pkgcache_pkgs (self, already_added, cancellable, error))
+      if (!add_remaining_cached_pkgs (self, already_added, cancellable, error))
         return FALSE;
     }
 
@@ -2053,7 +2030,7 @@ convert_dnf_action_to_string (DnfStateAction action)
 gboolean
 rpmostree_dnf_add_checksum_goal (GChecksum   *checksum,
                                  HyGoal       goal,
-                                 OstreeRepo  *pkgcache,
+                                 OstreeRepo  *repo,
                                  GError     **error)
 {
   g_autoptr(GPtrArray) pkglist = dnf_goal_get_packages (goal, DNF_PACKAGE_INFO_INSTALL,
@@ -2071,27 +2048,27 @@ rpmostree_dnf_add_checksum_goal (GChecksum   *checksum,
       const char *action_str = convert_dnf_action_to_string (action);
       g_checksum_update (checksum, (guint8*)action_str, strlen (action_str));
 
-      /* For pkgs that were added from the pkgcache repo (e.g. local RPMs and replacement
-       * overrides), make sure to pick up the SHA256 from the pkg metadata, rather than what
-       * libsolv figured out (which is based on our chopped off fake RPM, which clearly will
-       * not match what's in the repo). This ensures that two goals are equivalent whether
-       * the same RPM comes from a yum repo or from the pkgcache. */
+      /* For pkgs that were added from our repo (e.g. local RPMs and replacement overrides),
+       * make sure to pick up the SHA256 from the pkg metadata, rather than what libsolv
+       * figured out (which is based on our chopped off fake RPM, which clearly will not
+       * match what's in the repo). This ensures that two goals are equivalent whether the
+       * same RPM comes from a yum repo or from the repo. */
       const char *reponame = NULL;
-      if (pkgcache)
+      if (repo)
         reponame = dnf_package_get_reponame (pkg);
       if (g_strcmp0 (reponame, HY_CMDLINE_REPO_NAME) == 0)
         {
           g_autofree char *cachebranch = rpmostree_get_cache_branch_pkg (pkg);
           g_autofree char *cached_rev = NULL;
-          if (!ostree_repo_resolve_rev (pkgcache, cachebranch, FALSE, &cached_rev, error))
+          if (!ostree_repo_resolve_rev (repo, cachebranch, FALSE, &cached_rev, error))
             return FALSE;
 
           g_autoptr(GVariant) commit = NULL;
-          if (!ostree_repo_load_commit (pkgcache, cached_rev, &commit, NULL, error))
+          if (!ostree_repo_load_commit (repo, cached_rev, &commit, NULL, error))
             return FALSE;
 
           g_autofree char *chksum_repr = NULL;
-          if (!get_pkgcache_repodata_chksum_repr (commit, &chksum_repr, TRUE, error))
+          if (!get_repodata_chksum_repr (commit, &chksum_repr, TRUE, error))
             return FALSE;
 
           if (chksum_repr)
@@ -2122,7 +2099,7 @@ rpmostree_context_get_state_sha512 (RpmOstreeContext *self,
     {
       if (!rpmostree_dnf_add_checksum_goal (state_checksum,
                                             dnf_context_get_goal (self->dnfctx),
-                                            get_pkgcache_repo (self), error))
+                                            self->repo, error))
         return FALSE;
     }
 
@@ -2293,10 +2270,8 @@ start_async_import_one_package (RpmOstreeContext *self, DnfPackage *pkg,
   }
 
   /* TODO - tweak the unpacker flags for containers */
-  OstreeRepo *ostreerepo = get_pkgcache_repo (self);
   g_autoptr(RpmOstreeImporter) unpacker =
-    rpmostree_importer_new_take_fd (&fd, ostreerepo, pkg, flags,
-                                    self->sepolicy, error);
+    rpmostree_importer_new_take_fd (&fd, self->repo, pkg, flags, self->sepolicy, error);
   if (!unpacker)
     return FALSE;
 
@@ -2355,15 +2330,14 @@ rpmostree_context_import_rojig (RpmOstreeContext *self,
   if (n == 0)
     return TRUE;
 
-  OstreeRepo *repo = get_pkgcache_repo (self);
-  g_return_val_if_fail (repo != NULL, FALSE);
+  g_return_val_if_fail (self->repo != NULL, FALSE);
 
   if (!dnf_transaction_import_keys (dnf_context_get_transaction (dnfctx), error))
     return FALSE;
 
   g_auto(RpmOstreeRepoAutoTransaction) txn = { 0, };
   /* Note use of commit-on-failure */
-  if (!rpmostree_repo_auto_transaction_start (&txn, repo, TRUE, cancellable, error))
+  if (!rpmostree_repo_auto_transaction_start (&txn, self->repo, TRUE, cancellable, error))
     return FALSE;
 
   self->rojig_xattr_table = rojig_xattr_table;
@@ -2395,7 +2369,7 @@ rpmostree_context_import_rojig (RpmOstreeContext *self,
   rpmostree_output_progress_end ();
 
 
-  if (!ostree_repo_commit_transaction (repo, NULL, cancellable, error))
+  if (!ostree_repo_commit_transaction (self->repo, NULL, cancellable, error))
     return FALSE;
   txn.initialized = FALSE;
 
@@ -2680,26 +2654,8 @@ checkout_package_into_root (RpmOstreeContext *self,
                             GCancellable *cancellable,
                             GError      **error)
 {
-  OstreeRepo *pkgcache_repo = get_pkgcache_repo (self);
-
-  /* The below is currently TRUE only in the --ex-unified-core path. We probably want to
-   * migrate that over to always use a separate cache repo eventually, which would allow us
-   * to completely drop the pkgcache_repo/ostreerepo dichotomy in the core. See:
-   * https://github.com/projectatomic/rpm-ostree/pull/1055 */
-  if (pkgcache_repo != self->ostreerepo)
-    {
-      if (!rpmostree_pull_content_only (self->ostreerepo, pkgcache_repo, pkg_commit,
-                                        cancellable, error))
-        {
-          g_prefix_error (error, "Linking cached content for %s: ", dnf_package_get_nevra (pkg));
-          return FALSE;
-        }
-    }
-
-  if (!checkout_package (pkgcache_repo, dfd, path,
-                         devino_cache, pkg_commit, files_skip, ovwmode,
-                         !self->enable_rofiles,
-                         cancellable, error))
+  if (!checkout_package (self->repo, dfd, path, devino_cache, pkg_commit, files_skip,
+                         ovwmode, !self->enable_rofiles, cancellable, error))
     return glnx_prefix_error (error, "Checkout %s", dnf_package_get_nevra (pkg));
 
   return TRUE;
@@ -2937,23 +2893,22 @@ relabel_in_thread_impl (RpmOstreeContext *self,
   GLNX_AUTO_PREFIX_ERROR (errmsg, error);
   const char *pkg_dirname = nevra;
 
-  OstreeRepo *repo = get_pkgcache_repo (self);
   g_autofree char *cachebranch = rpmostree_get_cache_branch_for_n_evr_a (name, evr, arch);
   g_autofree char *commit_csum = NULL;
-  if (!ostree_repo_resolve_rev (repo, cachebranch, FALSE,
+  if (!ostree_repo_resolve_rev (self->repo, cachebranch, FALSE,
                                 &commit_csum, error))
     return FALSE;
 
   /* Compute the original content checksum */
   g_autoptr(GVariant) orig_commit = NULL;
-  if (!ostree_repo_load_commit (repo, commit_csum, &orig_commit, NULL, error))
+  if (!ostree_repo_load_commit (self->repo, commit_csum, &orig_commit, NULL, error))
     return FALSE;
   g_autofree char *orig_content_checksum = rpmostree_commit_content_checksum (orig_commit);
 
   /* checkout the pkg and relabel, breaking hardlinks */
   g_autoptr(OstreeRepoDevInoCache) cache = ostree_repo_devino_cache_new ();
 
-  if (!checkout_package (repo, tmpdir_dfd, pkg_dirname, cache,
+  if (!checkout_package (self->repo, tmpdir_dfd, pkg_dirname, cache,
                          commit_csum, NULL, OSTREE_REPO_CHECKOUT_OVERWRITE_NONE, FALSE,
                          cancellable, error))
     return FALSE;
@@ -2966,19 +2921,19 @@ relabel_in_thread_impl (RpmOstreeContext *self,
   ostree_repo_commit_modifier_set_sepolicy (modifier, self->sepolicy);
 
   g_autoptr(OstreeMutableTree) mtree = ostree_mutable_tree_new ();
-  if (!ostree_repo_write_dfd_to_mtree (repo, tmpdir_dfd, pkg_dirname, mtree,
+  if (!ostree_repo_write_dfd_to_mtree (self->repo, tmpdir_dfd, pkg_dirname, mtree,
                                        modifier, cancellable, error))
     return glnx_prefix_error (error, "Writing dfd");
 
   g_autoptr(GFile) root = NULL;
-  if (!ostree_repo_write_mtree (repo, mtree, &root, cancellable, error))
+  if (!ostree_repo_write_mtree (self->repo, mtree, &root, cancellable, error))
     return FALSE;
 
   /* build metadata and commit */
   g_autoptr(GVariant) commit_var = NULL;
   g_autoptr(GVariantDict) meta_dict = NULL;
 
-  if (!ostree_repo_load_commit (repo, commit_csum, &commit_var, NULL, error))
+  if (!ostree_repo_load_commit (self->repo, commit_csum, &commit_var, NULL, error))
     return FALSE;
 
   /* let's just copy the metadata from the previous commit and only change the
@@ -2990,7 +2945,7 @@ relabel_in_thread_impl (RpmOstreeContext *self,
                          ostree_sepolicy_get_csum (self->sepolicy));
 
   g_autofree char *new_commit_csum = NULL;
-  if (!ostree_repo_write_commit (repo, NULL, "", "",
+  if (!ostree_repo_write_commit (self->repo, NULL, "", "",
                                  g_variant_dict_end (meta_dict),
                                  OSTREE_REPO_FILE (root), &new_commit_csum,
                                  cancellable, error))
@@ -2998,12 +2953,12 @@ relabel_in_thread_impl (RpmOstreeContext *self,
 
   /* Compute new content checksum */
   g_autoptr(GVariant) new_commit = NULL;
-  if (!ostree_repo_load_commit (repo, new_commit_csum, &new_commit, NULL, error))
+  if (!ostree_repo_load_commit (self->repo, new_commit_csum, &new_commit, NULL, error))
     return FALSE;
   g_autofree char *new_content_checksum = rpmostree_commit_content_checksum (new_commit);
 
   /* Queue an update to the ref */
-  ostree_repo_transaction_set_ref (repo, NULL, cachebranch, new_commit_csum);
+  ostree_repo_transaction_set_ref (self->repo, NULL, cachebranch, new_commit_csum);
 
   /* Return whether or not we actually changed content */
   *out_changed = !g_str_equal (orig_content_checksum, new_content_checksum);
@@ -3102,22 +3057,20 @@ relabel_if_necessary (RpmOstreeContext *self,
     return TRUE;
 
   const int n = self->pkgs_to_relabel->len;
-  OstreeRepo *ostreerepo = get_pkgcache_repo (self);
-
   if (n == 0)
     return TRUE;
 
   g_assert (self->sepolicy);
 
-  g_return_val_if_fail (ostreerepo != NULL, FALSE);
+  g_return_val_if_fail (self->repo != NULL, FALSE);
 
   /* Prep a txn and tmpdir for all of the relabels */
   g_auto(RpmOstreeRepoAutoTransaction) txn = { 0, };
-  if (!rpmostree_repo_auto_transaction_start (&txn, ostreerepo, FALSE, cancellable, error))
+  if (!rpmostree_repo_auto_transaction_start (&txn, self->repo, FALSE, cancellable, error))
     return FALSE;
 
   g_auto(GLnxTmpDir) relabel_tmpdir = { 0, };
-  if (!glnx_mkdtempat (ostree_repo_get_dfd (ostreerepo), "tmp/rpm-ostree-relabel.XXXXXX", 0700,
+  if (!glnx_mkdtempat (ostree_repo_get_dfd (self->repo), "tmp/rpm-ostree-relabel.XXXXXX", 0700,
                        &relabel_tmpdir, error))
     return FALSE;
 
@@ -3147,7 +3100,7 @@ relabel_if_necessary (RpmOstreeContext *self,
   rpmostree_output_progress_end ();
 
   /* Commit */
-  if (!ostree_repo_commit_transaction (ostreerepo, NULL, cancellable, error))
+  if (!ostree_repo_commit_transaction (self->repo, NULL, cancellable, error))
     return FALSE;
 
   sd_journal_send ("MESSAGE_ID=" SD_ID128_FORMAT_STR, SD_ID128_FORMAT_VAL(RPMOSTREE_MESSAGE_SELINUX_RELABEL),
@@ -3538,16 +3491,14 @@ add_install (RpmOstreeContext *self,
              GCancellable     *cancellable,
              GError          **error)
 {
-  OstreeRepo *pkgcache_repo = get_pkgcache_repo (self);
   g_autofree char *cachebranch = rpmostree_get_cache_branch_pkg (pkg);
   g_autofree char *cached_rev = NULL;
 
-  if (!ostree_repo_resolve_rev (pkgcache_repo, cachebranch, FALSE,
-                                &cached_rev, error))
+  if (!ostree_repo_resolve_rev (self->repo, cachebranch, FALSE, &cached_rev, error))
     return FALSE;
 
   g_autoptr(GVariant) commit = NULL;
-  if (!ostree_repo_load_commit (pkgcache_repo, cached_rev, &commit, NULL, error))
+  if (!ostree_repo_load_commit (self->repo, cached_rev, &commit, NULL, error))
     return FALSE;
 
   gboolean sepolicy_matches;
@@ -3677,7 +3628,7 @@ rpmostree_context_assemble (RpmOstreeContext      *self,
   if (self->tmprootfs_dfd == -1)
     {
       g_assert (!self->repo_tmpdir.initialized);
-      int repo_dfd = ostree_repo_get_dfd (self->ostreerepo); /* Borrowed */
+      int repo_dfd = ostree_repo_get_dfd (self->repo); /* Borrowed */
       if (!glnx_mkdtempat (repo_dfd, "tmp/rpmostree-assemble-XXXXXX", 0700,
                            &self->repo_tmpdir, error))
         return FALSE;
@@ -4271,7 +4222,7 @@ rpmostree_context_commit (RpmOstreeContext      *self,
   g_auto(RpmOstreeOutputTask) task = rpmostree_output_task_begin ("Writing OSTree commit");
 
   g_auto(RpmOstreeRepoAutoTransaction) txn = { 0, };
-  if (!rpmostree_repo_auto_transaction_start (&txn, self->ostreerepo, FALSE, cancellable, error))
+  if (!rpmostree_repo_auto_transaction_start (&txn, self->repo, FALSE, cancellable, error))
     return FALSE;
 
   { glnx_unref_object OstreeMutableTree *mtree = NULL;
@@ -4288,7 +4239,7 @@ rpmostree_context_commit (RpmOstreeContext      *self,
 
         g_assert (parent != NULL);
 
-        if (!ostree_repo_load_commit (self->ostreerepo, parent, &commit, NULL, error))
+        if (!ostree_repo_load_commit (self->repo, parent, &commit, NULL, error))
           return FALSE;
 
         parent_version = checksum_version (commit);
@@ -4380,7 +4331,7 @@ rpmostree_context_commit (RpmOstreeContext      *self,
 
     OstreeRepoCommitModifierFlags modflags = OSTREE_REPO_COMMIT_MODIFIER_FLAGS_NONE;
     /* For ex-container (bare-user-only), we always need canonical permissions */
-    if (ostree_repo_get_mode (self->ostreerepo) == OSTREE_REPO_MODE_BARE_USER_ONLY)
+    if (ostree_repo_get_mode (self->repo) == OSTREE_REPO_MODE_BARE_USER_ONLY)
       modflags |= OSTREE_REPO_COMMIT_MODIFIER_FLAGS_CANONICAL_PERMISSIONS;
 
     /* if we're SELinux aware, then reload the final policy from the tmprootfs in case it
@@ -4400,7 +4351,7 @@ rpmostree_context_commit (RpmOstreeContext      *self,
             g_strcmp0 (ostree_sepolicy_get_csum (self->sepolicy),
                        ostree_sepolicy_get_csum (final_sepolicy)) == 0)
           {
-            if (ostree_repo_get_mode (self->ostreerepo) == OSTREE_REPO_MODE_BARE)
+            if (ostree_repo_get_mode (self->repo) == OSTREE_REPO_MODE_BARE)
               modflags |= OSTREE_REPO_COMMIT_MODIFIER_FLAGS_DEVINO_CANONICAL;
           }
       }
@@ -4415,16 +4366,16 @@ rpmostree_context_commit (RpmOstreeContext      *self,
     mtree = ostree_mutable_tree_new ();
 
     const guint64 start_time_ms = g_get_monotonic_time () / 1000;
-    if (!ostree_repo_write_dfd_to_mtree (self->ostreerepo, self->tmprootfs_dfd, ".",
+    if (!ostree_repo_write_dfd_to_mtree (self->repo, self->tmprootfs_dfd, ".",
                                          mtree, commit_modifier,
                                          cancellable, error))
       return FALSE;
 
-    if (!ostree_repo_write_mtree (self->ostreerepo, mtree, &root, cancellable, error))
+    if (!ostree_repo_write_mtree (self->repo, mtree, &root, cancellable, error))
       return FALSE;
 
     { g_autoptr(GVariant) metadata = g_variant_ref_sink (g_variant_builder_end (&metadata_builder));
-      if (!ostree_repo_write_commit (self->ostreerepo, parent, "", "",
+      if (!ostree_repo_write_commit (self->repo, parent, "", "",
                                      metadata,
                                      OSTREE_REPO_FILE (root),
                                      &ret_commit_checksum, cancellable, error))
@@ -4433,14 +4384,14 @@ rpmostree_context_commit (RpmOstreeContext      *self,
 
     { const char * ref = rpmostree_treespec_get_ref (self->spec);
       if (ref != NULL)
-        ostree_repo_transaction_set_ref (self->ostreerepo, NULL, ref,
+        ostree_repo_transaction_set_ref (self->repo, NULL, ref,
                                          ret_commit_checksum);
     }
 
     { OstreeRepoTransactionStats stats;
       g_autofree char *bytes_written_formatted = NULL;
 
-      if (!ostree_repo_commit_transaction (self->ostreerepo, &stats, cancellable, error))
+      if (!ostree_repo_commit_transaction (self->repo, &stats, cancellable, error))
         return FALSE;
 
       bytes_written_formatted = g_format_size (stats.content_bytes_written);
