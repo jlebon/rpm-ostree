@@ -711,6 +711,18 @@ rpm_ostree_compose_context_new (const char    *treefile_pathstr,
 
   self->metadata = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
                                           (GDestroyNotify)g_variant_unref);
+
+  /* metadata from the treefile itself has the lowest priority */
+  JsonNode *add_commit_metadata_node =
+    json_object_get_member (self->treefile, "add-commit-metadata");
+  if (add_commit_metadata_node)
+    {
+      if (!rpmostree_composeutil_read_json_metadata (add_commit_metadata_node,
+                                                     self->metadata, error))
+        return FALSE;
+    }
+
+  /* then --add-metadata-from-json */
   if (opt_metadata_json)
     {
       if (!rpmostree_composeutil_read_json_metadata_from_file (opt_metadata_json,
@@ -718,11 +730,13 @@ rpm_ostree_compose_context_new (const char    *treefile_pathstr,
         return FALSE;
     }
 
+  /* and finally --add-metadata-string */
   if (opt_metadata_strings)
     {
       if (!parse_metadata_keyvalue_strings (opt_metadata_strings, self->metadata, error))
         return FALSE;
     }
+
 
   g_auto(GStrv) layers = ror_treefile_get_all_ostree_layers (self->treefile_rs);
   if (layers && *layers && !opt_unified_core)
