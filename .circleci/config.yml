@@ -1,0 +1,20 @@
+version: 2
+general:
+  branches:
+    only:
+      - circleci
+jobs:
+  build:
+    docker:
+      - image: registry.fedoraproject.org/fedora:30
+
+    steps:
+      - checkout
+
+      - run:
+          name: Greeting
+          command: echo Hello, world.
+
+      - run:
+          name: Print the Current Time
+          command: date
