@@ -1,11 +1,16 @@
-@Library('github.com/coreos/coreos-ci-lib@master') _
+@Library('github.com/jlebon/coreos-ci-lib@pr/cpu-requests') _ // XXX
+
+COSA_IMAGE = 'quay.io/coreos-assembler/coreos-assembler:latest'
+COSA_BUILDROOT_IMAGE = 'registry.svc.ci.openshift.org/coreos/cosa-buildroot:latest'
 
 stage("Build") {
 parallel rpms: {
-  coreos.pod(image: 'registry.svc.ci.openshift.org/coreos/cosa-buildroot:latest', runAsUser: 0) {
+  coreos.pod(image: COSA_BUILDROOT_IMAGE, runAsUser: 0) {
       checkout scm
       sh """
         set -euo pipefail
+        # fetch tags so `git describe` gives a nice NEVRA when building the RPM
+        git fetch origin --tags
         ci/installdeps.sh
         git submodule update --init
 
@@ -20,11 +25,13 @@ parallel rpms: {
         cd packaging
         make -f Makefile.dist-packaging rpm
       """
+      // make it easy for anyone to download the RPMs
+      archiveArtifacts 'packaging/**/*.rpm'
       stash includes: 'packaging/**/*.rpm', name: 'rpms'
   }
 },
 codestyle: {
-  coreos.pod(image: 'quay.io/coreos-assembler/coreos-assembler:latest') {
+  coreos.pod(image: COSA_IMAGE) {
       checkout scm
       sh """
         set -euo pipefail
@@ -37,7 +44,7 @@ codestyle: {
   }
 },
 msrv: {
-  coreos.pod(image: 'registry.svc.ci.openshift.org/coreos/cosa-buildroot:latest', runAsUser: 0) {
+  coreos.pod(image: COSA_BUILDROOT_IMAGE, runAsUser: 0) {
       checkout scm
 
       sh """
@@ -48,58 +55,61 @@ msrv: {
 }}
 
 stage("Build FCOS") {
-  coreos.pod(image: 'quay.io/coreos-assembler/coreos-assembler:latest', runAsUser: 0, kvm: true) {
+  coreos.pod(image: COSA_IMAGE, runAsUser: 0, kvm: true) {
       unstash 'rpms'
       sh """
         set -euo pipefail
 
+        rpms=\$(find packaging/ ! -name '*.src.rpm' -name '*.rpm')
+
         # install our built rpm-ostree
-        find packaging/ ! -name '*.src.rpm' -name '*.rpm' | xargs dnf install -y
+        dnf install -y \${rpms}
+
+        # and build FCOS with our built rpm-ostree inside of it
+        # XXX
+        coreos-assembler init --branch pr/add-attr --force https://github.com/jlebon/fedora-coreos-config
+        mkdir -p overrides/rpm
+        mv \${rpms} overrides/rpm
         rm -rf packaging
 
-        # and build FCOS
-        coreos-assembler init --force https://github.com/coreos/fedora-coreos-config
         coreos-assembler build
       """
       stash includes: 'builds/latest/*/*.qcow2', name: 'fcos'
   }
 }
 
-/*
-stage("Test") {
-parallel vmcheck: {
-  coreos.pod(image: 'quay.io/coreos-assembler/coreos-assembler:latest', runAsUser: 0, kvm: true) {
+
+stage("Run vmcheck") {
+  def nhosts = 6
+  def mem = (nhosts * 1024) + 512
+  coreos.pod(image: COSA_IMAGE, runAsUser: 0, kvm: true, memory: "${mem}Mi", cpu: "${nhosts}") {
       checkout scm
       unstash 'rpms'
       sh """
         set -euo pipefail
+        ci/installdeps.sh  # really, we just need test deps, but meh...
 
         # install our built rpm-ostree
         find packaging/ ! -name '*.src.rpm' -name '*.rpm' | xargs dnf install -y
         rm -rf packaging
       """
       unstash 'fcos'
-      sh """
-        set -euo pipefail
-
-        echo "standing up VMs"
-        find builds/ -name '*.qcow2'
-      """
+      try {
+        timeout(time: 30, unit: 'MINUTES') {
+          sh """
+            set -xeuo pipefail
+            fcos=\$(ls builds/latest/*/*.qcow2) # */
+            ln -sf "\$(realpath \${fcos})" tests/vmcheck/image.qcow2
+            NHOSTS=${nhosts} tests/vmcheck.sh
+          """
+        }
+      } finally {
+        sh """
+          if [ -d vmcheck-logs ]; then
+            tar -C vmcheck-logs -cf- . | xz -c9 > vmcheck-logs.tar.xz
+          fi
+        """
+        archiveArtifacts allowEmptyArchive: true, artifacts: 'vmcheck-logs.tar.xz'
+      }
   }
-},
-compose: {
-  coreos.pod(image: 'quay.io/coreos-assembler/coreos-assembler:latest', runAsUser: 0, kvm: true) {
-      checkout scm
-      unstash 'rpms'
-      sh """
-        set -euo pipefail
-
-        # install our built rpm-ostree
-        find packaging/ ! -name '*.src.rpm' -name '*.rpm' | xargs dnf install -y
-        rm -rf packaging
-
-        echo "starting compose tests in supermin"
-      """
-  }
-}}
-*/
+}
