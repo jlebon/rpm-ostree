@@ -1,39 +1,51 @@
-@Library('github.com/coreos/coreos-ci-lib@master') _
+pipeline {
+  agent any
+  stages {
+    stage('first-solo') {
+      steps {
+        sh 'echo \'dummy text\''
+      }
+    }
+    stage('parent') {
+        parallel {
+            stage('single-stage') {
+              steps {
+                sh 'echo \'dummy text\''
+              }
+            }
+            
+            stage('multiple-stages') {
+                stages {
+                    stage('first-sequential-stage') {
+                      steps {
+                        sh 'echo \'dummy text\''
+                      }
+                    }
+                    stage('second-sequential-stage') {
+                      steps {
+                        sh 'echo \'dummy text\''
+                      }
+                    }
+                    stage('third-sequential-stage') {
+                      steps {
+                        sh 'echo \'dummy text\''
+                      }
+                    }
+                }
+            }
 
-stage("Build") {
-parallel rpms: {
-  node {
-    sh "echo hello world"
+            stage('other-single-stage') {
+              steps {
+                sh 'echo \'dummy text\''
+              }
+            }
+        }
+    }
+    stage('second-solo') {
+      steps {
+        sh 'echo \'dummy text\''
+      }
+    }
   }
-},
-codestyle: {
-  node {
-    sh "echo hello world"
-  }
-},
-msrv: {
-  node {
-    sh "echo hello world"
-  }
-}}
+}
 
-stage("Test") {
-parallel vmcheck: {
-stage("Build FCOS") {
-  node {
-    sh "echo hello world"
-  }
-}
-stage("Run vmcheck") {
-  node {
-    sh "echo hello world"
-  }
-}},
-compose: {
-   stage("Compose") {
-     node {
-       sh "echo hello world"
-     }
-   }
-}
-}
