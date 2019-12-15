@@ -1,114 +1,39 @@
 @Library('github.com/coreos/coreos-ci-lib@master') _
 
-COSA_IMAGE = 'quay.io/coreos-assembler/coreos-assembler:latest'
-COSA_BUILDROOT_IMAGE = 'registry.svc.ci.openshift.org/coreos/cosa-buildroot:latest'
-
 stage("Build") {
 parallel rpms: {
-  coreos.pod(image: COSA_BUILDROOT_IMAGE, runAsUser: 0) {
-      checkout scm
-      sh """
-        set -euo pipefail
-        # fetch tags so `git describe` gives a nice NEVRA when building the RPM
-        git fetch origin --tags
-        ci/installdeps.sh
-        git submodule update --init
-
-        # We lose sanitizers (all the *san) here by building straight to RPMs, but we can
-        # restore those through a build opt later on. Being able to stash RPMs directly is
-        # super nice (and archiving later on will make it easy for anyone to download
-        # binaries from PRs in the future) and meshes well with the following stages.
-        export PATH="/root/.cargo/bin:\$PATH"
-        cargo install cbindgen
-        cbindgen -c rust/cbindgen.toml -o rpmostree-rust.h rust
-
-        cd packaging
-        make -f Makefile.dist-packaging rpm
-      """
-      // make it easy for anyone to download the RPMs
-      archiveArtifacts 'packaging/**/*.rpm'
-      stash includes: 'packaging/**/*.rpm', name: 'rpms'
+  node {
+    sh "echo hello world"
   }
 },
 codestyle: {
-  coreos.pod(image: COSA_IMAGE) {
-      checkout scm
-      sh """
-        set -euo pipefail
-        # Jenkins by default only fetches the branch it's testing. Explicitly fetch master
-        # for ci-commitmessage-submodules.sh
-        git fetch origin +refs/heads/master:refs/remotes/origin/master
-        ci/ci-commitmessage-submodules.sh
-        ci/codestyle.sh
-      """
+  node {
+    sh "echo hello world"
   }
 },
 msrv: {
-  coreos.pod(image: COSA_BUILDROOT_IMAGE, runAsUser: 0) {
-      checkout scm
-
-      sh """
-        set -euo pipefail
-        ci/msrv.sh
-      """
+  node {
+    sh "echo hello world"
   }
 }}
 
+stage("Test") {
+parallel vmcheck: {
 stage("Build FCOS") {
-  coreos.pod(image: COSA_IMAGE, runAsUser: 0, kvm: true) {
-      unstash 'rpms'
-      sh """
-        set -euo pipefail
-
-        rpms=\$(find packaging/ ! -name '*.src.rpm' -name '*.rpm')
-
-        # install our built rpm-ostree
-        dnf install -y \${rpms}
-
-        # and build FCOS with our built rpm-ostree inside of it
-        coreos-assembler init --force https://github.com/coreos/fedora-coreos-config
-        mkdir -p overrides/rpm
-        mv \${rpms} overrides/rpm
-        rm -rf packaging
-
-        coreos-assembler build
-      """
-      stash includes: 'builds/latest/*/*.qcow2', name: 'fcos'
+  node {
+    sh "echo hello world"
   }
 }
-
-
 stage("Run vmcheck") {
-  def nhosts = 6
-  def mem = (nhosts * 1024) + 512
-  coreos.pod(image: COSA_IMAGE, runAsUser: 0, kvm: true, memory: "${mem}Mi", cpu: "${nhosts}") {
-      checkout scm
-      unstash 'rpms'
-      sh """
-        set -euo pipefail
-        ci/installdeps.sh  # really, we just need test deps, but meh...
-
-        # install our built rpm-ostree
-        find packaging/ ! -name '*.src.rpm' -name '*.rpm' | xargs dnf install -y
-        rm -rf packaging
-      """
-      unstash 'fcos'
-      try {
-        timeout(time: 30, unit: 'MINUTES') {
-          sh """
-            set -xeuo pipefail
-            fcos=\$(ls builds/latest/*/*.qcow2) # */
-            ln -sf "\$(realpath \${fcos})" tests/vmcheck/image.qcow2
-            NHOSTS=${nhosts} tests/vmcheck.sh
-          """
-        }
-      } finally {
-        sh """
-          if [ -d vmcheck-logs ]; then
-            tar -C vmcheck-logs -cf- . | xz -c9 > vmcheck-logs.tar.xz
-          fi
-        """
-        archiveArtifacts allowEmptyArchive: true, artifacts: 'vmcheck-logs.tar.xz'
-      }
+  node {
+    sh "echo hello world"
   }
+}},
+compose: {
+   stage("Compose") {
+     node {
+       sh "echo hello world"
+     }
+   }
+}
 }
