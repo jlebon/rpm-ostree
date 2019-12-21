@@ -51,12 +51,14 @@ _cleanup_tmpdir () {
 
 # Create a tmpdir if we're running as a local test (i.e. through `make check`)
 # or as a `vmcheck` test, which also needs some scratch space on the host.
-if ( test -n "${UNINSTALLEDTESTS:-}" || test -n "${VMTESTS:-}" ) && ! test -f $PWD/.test; then
+if { test -n "${UNINSTALLEDTESTS:-}" || \
+     test -n "${VMTESTS:-}" || \
+     test -n "${COMPOSETESTS:-}"; } && ! test -f "$PWD/.test"; then
    # Use --tmpdir to keep it in /tmp. This also keeps paths short; this is
    # important if we want to create UNIX sockets under there.
    test_tmpdir=$(mktemp -d test.XXXXXX --tmpdir)
    touch ${test_tmpdir}/.test
-   trap _cleanup_tmpdir EXIT
+   trap _cleanup_tmpdir EXIT SIGINT
    cd ${test_tmpdir}
 fi
 if test -n "${UNINSTALLEDTESTS:-}"; then
@@ -404,6 +406,8 @@ EOF
         case $section in
         requires)
             echo "Requires: $arg" >> $spec;;
+        recommends)
+            echo "Recommends: $arg" >> $spec;;
         provides)
             echo "Provides: $arg" >> $spec;;
         conflicts)
