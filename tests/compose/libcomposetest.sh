@@ -81,116 +81,38 @@ runcompose() {
 # has to run this testsuite as root, or use unprivileged. XXX: to investigate.
 
 runasroot() {
-    if has_privileges; then
+    if has_compose_privileges; then
         "$@"
     else
         runvm "$@"
     fi
 }
 
-# The two functions below were taken and adapted from coreos-assembler. We
+# This function below was taken and adapted from coreos-assembler. We
 # should look into sharing this code more easily.
 
-_privileged=
-has_privileges() {
-    if [ -z "${_privileged:-}" ]; then
-        if [ -n "${FORCE_UNPRIVILEGED:-}" ]; then
-            echo "Detected FORCE_UNPRIVILEGED; using virt"
-            _privileged=0
-        elif ! capsh --print | grep -q 'Bounding.*cap_sys_admin'; then
-            echo "Missing CAP_SYS_ADMIN; using virt"
-            _privileged=0
-        elif [ "$(id -u)" != "0" ]; then
-            echo "Not running as root; using virt"
-            _privileged=0
-        else
-            _privileged=1
-        fi
-    fi
-    [ ${_privileged} == 1 ]
-}
-
 runvm() {
-    local vmpreparedir=tmp/supermin.prepare
-    local vmbuilddir=tmp/supermin.build
-
-    # just build it once (unlike in cosa where these dirs hang out, these test
-    # dirs are ephemeral -- we could probably share across tests too really...)
-    if [ ! -d "${vmbuilddir}" ]; then
-        rm -rf "${vmpreparedir}" "${vmbuilddir}"
-        mkdir -p "${vmpreparedir}" "${vmbuilddir}"
-
+    if [ ! -f tmp/cache.qcow2 ]; then
+        mkdir -p tmp
         qemu-img create -f qcow2 tmp/cache.qcow2 8G
         LIBGUESTFS_BACKEND=direct virt-format --filesystem=xfs -a tmp/cache.qcow2
-
-        # we just import the strict minimum here that rpm-ostree needs
-        local rpms="rpm-ostree bash rpm-build coreutils selinux-policy-targeted dhcp-client util-linux"
-        # shellcheck disable=SC2086
-        supermin --prepare --use-installed -o "${vmpreparedir}" $rpms
-
-        # the reason we do a heredoc here is so that the var substition takes
-        # place immediately instead of having to proxy them through to the VM
-        cat > "${vmpreparedir}/init" <<EOF
-#!/bin/bash
-set -xeuo pipefail
-export PATH=/usr/sbin:$PATH
-
-mount -t proc /proc /proc
-mount -t sysfs /sys /sys
-mount -t devtmpfs devtmpfs /dev
-
-LANG=C /sbin/load_policy -i
-
-# load kernel module for 9pnet_virtio for 9pfs mount
-/sbin/modprobe 9pnet_virtio
-
-# need fuse module for rofiles-fuse/bwrap during post scripts run
-/sbin/modprobe fuse
-
-# set up networking
-/usr/sbin/dhclient eth0
-
-# set the umask so that anyone in the group can rwx
-umask 002
-
-# automatically proxy all rpm-ostree specific variables
-$(env | grep ^RPMOSTREE | xargs -r echo export)
-
-# we only need two dirs
-mkdir -p "${fixtures}" "${test_tmpdir}"
-mount -t 9p -o ro,trans=virtio,version=9p2000.L cache "${fixtures}"
-mount -t 9p -o rw,trans=virtio,version=9p2000.L testdir "${test_tmpdir}"
-mount /dev/sdb1 "${test_tmpdir}/cache"
-cd "${test_tmpdir}"
-
-# hack for non-unified mode
-rm -rf cache/workdir && mkdir cache/workdir
-
-rc=0
-sh -x tmp/cmd.sh || rc=\$?
-echo \$rc > tmp/cmd.sh.rc
-if [ -b /dev/sdb1 ]; then
-    /sbin/fstrim -v cache
-fi
-/sbin/reboot -f
-EOF
-      chmod a+x "${vmpreparedir}"/init
-      (cd "${vmpreparedir}" && tar -czf init.tar.gz --remove-files init)
-      supermin --build "${vmpreparedir}" --size 5G -f ext2 -o "${vmbuilddir}"
     fi
 
+    echo "export test_tmpdir=${test_tmpdir}" > tmp/env
+    # automatically proxy RPMOSTREE env vars
+    $(env | (grep ^RPMOSTREE || :) | xargs -r echo export) >> tmp/env
     echo "$@" > tmp/cmd.sh
 
     #shellcheck disable=SC2086
     qemu-kvm \
         -nodefaults -nographic -m 1536 -no-reboot -cpu host \
-        -kernel "${vmbuilddir}/kernel" \
-        -initrd "${vmbuilddir}/initrd" \
+        -kernel "${fixtures}/supermin.build/kernel" \
+        -initrd "${fixtures}/supermin.build/initrd" \
         -netdev user,id=eth0,hostname=supermin \
         -device virtio-net-pci,netdev=eth0 \
         -device virtio-scsi-pci,id=scsi0,bus=pci.0,addr=0x3 \
         -object rng-random,filename=/dev/urandom,id=rng0 -device virtio-rng-pci,rng=rng0 \
-        -drive if=none,id=drive-scsi0-0-0-0,snapshot=on,file="${vmbuilddir}/root" \
+        -drive if=none,id=drive-scsi0-0-0-0,snapshot=on,file="${fixtures}/supermin.build/root" \
         -device scsi-hd,bus=scsi0.0,channel=0,scsi-id=0,lun=0,drive=drive-scsi0-0-0-0,id=scsi0-0-0-0,bootindex=1 \
         -drive if=none,id=drive-scsi0-0-0-1,discard=unmap,file=tmp/cache.qcow2 \
         -device scsi-hd,bus=scsi0.0,channel=0,scsi-id=0,lun=1,drive=drive-scsi0-0-0-1,id=scsi0-0-0-1 \

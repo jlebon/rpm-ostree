@@ -581,3 +581,26 @@ assert_jq() {
         fi
     done
 }
+
+# This function below was taken and adapted from coreos-assembler. We
+# should look into sharing this code more easily.
+
+# Determine if current user has enough privileges for composes
+_privileged=
+has_compose_privileges() {
+    if [ -z "${_privileged:-}" ]; then
+        if [ -n "${FORCE_UNPRIVILEGED:-}" ]; then
+            echo "Detected FORCE_UNPRIVILEGED; using virt"
+            _privileged=0
+        elif ! capsh --print | grep -q 'Bounding.*cap_sys_admin'; then
+            echo "Missing CAP_SYS_ADMIN; using virt"
+            _privileged=0
+        elif [ "$(id -u)" != "0" ]; then
+            echo "Not running as root; using virt"
+            _privileged=0
+        else
+            _privileged=1
+        fi
+    fi
+    [ ${_privileged} == 1 ]
+}

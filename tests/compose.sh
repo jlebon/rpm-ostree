@@ -11,7 +11,7 @@ commondir=$(cd "$dn/common" && pwd)
 export topsrcdir commondir
 
 # shellcheck source=common/libtest-core.sh
-. "${commondir}/libtest-core.sh"
+. "${commondir}/libtest.sh"
 
 read -r -a tests <<< "$(filter_tests "${topsrcdir}/tests/compose")"
 if [ ${#tests[*]} -eq 0 ]; then
@@ -20,6 +20,9 @@ if [ ${#tests[*]} -eq 0 ]; then
 fi
 
 JOBS=${JOBS:-$(ncpus)}
+
+outputdir="${topsrcdir}/compose-logs"
+fixtures="$(pwd)/compose-cache"
 
 # re-use the same FCOS config and RPMs if it already exists
 if [ ! -d compose-cache ]; then
@@ -33,6 +36,7 @@ if [ ! -d compose-cache ]; then
   # can clean this up.
   pushd compose-cache
   git clone https://github.com/coreos/fedora-coreos-config config
+
   pushd config
   git checkout "${FEDORA_COREOS_CONFIG_COMMIT}"
   # we flatten the treefile to make it easier to manipulate in tests (we have
@@ -42,6 +46,68 @@ if [ ! -d compose-cache ]; then
   mv manifests/{passwd,group} .
   rm -rf manifests/
   popd
+
+  if ! has_compose_privileges; then
+    # Unlike cosa, we don't need as much flexibility since we don't e.g. build
+    # images. So just create the supermin appliance and root now so each test
+    # doesn't have to build it.
+    mkdir -p supermin.{prepare,build}
+    # we just import the strict minimum here that rpm-ostree needs
+    rpms="rpm-ostree bash rpm-build coreutils selinux-policy-targeted dhcp-client util-linux"
+    # shellcheck disable=SC2086
+    supermin --prepare --use-installed -o supermin.prepare $rpms
+    # the reason we do a heredoc here is so that the var substition takes
+    # place immediately instead of having to proxy them through to the VM
+    cat > init <<EOF
+#!/bin/bash
+set -xeuo pipefail
+export PATH=/usr/sbin:$PATH
+
+mount -t proc /proc /proc
+mount -t sysfs /sys /sys
+mount -t devtmpfs devtmpfs /dev
+
+LANG=C /sbin/load_policy -i
+
+# load kernel module for 9pnet_virtio for 9pfs mount
+/sbin/modprobe 9pnet_virtio
+
+# need fuse module for rofiles-fuse/bwrap during post scripts run
+/sbin/modprobe fuse
+
+# set up networking
+/usr/sbin/dhclient eth0
+
+# set the umask so that anyone in the group can rwx
+umask 002
+
+# mount once somewhere predictable to source env vars
+mount -t 9p -o rw,trans=virtio,version=9p2000.L testdir /mnt
+source /mnt/tmp/env
+umount /mnt
+
+# we only need two dirs
+mkdir -p "${fixtures}" "\${test_tmpdir}"
+mount -t 9p -o ro,trans=virtio,version=9p2000.L cache "${fixtures}"
+mount -t 9p -o rw,trans=virtio,version=9p2000.L testdir "\${test_tmpdir}"
+mount /dev/sdb1 "\${test_tmpdir}/cache"
+cd "\${test_tmpdir}"
+
+# hack for non-unified mode
+rm -rf cache/workdir && mkdir cache/workdir
+
+rc=0
+sh -x tmp/cmd.sh || rc=\$?
+echo \$rc > tmp/cmd.sh.rc
+if [ -b /dev/sdb1 ]; then
+    /sbin/fstrim -v cache
+fi
+/sbin/reboot -f
+EOF
+    chmod a+x init
+    tar -czf supermin.prepare/init.tar.gz --remove-files init
+    supermin --build "${fixtures}/supermin.prepare" --size 5G -f ext2 -o supermin.build
+  fi
 
   mkdir cachedir
   # we just need a repo so we can download stuff (but see note above about
@@ -54,6 +120,7 @@ if [ ! -d compose-cache ]; then
   rm -rf repo
   (cd cachedir && createrepo_c .)
   echo -e "[cache]\nbaseurl=$(pwd)/cachedir\ngpgcheck=0" > config/cache.repo
+
   pushd config
   python3 -c '
 import sys, json
@@ -65,13 +132,12 @@ json.dump(y, sys.stdout)' < manifest.json > manifest.json.new
   git -c user.email="composetest@localhost.com" -c user.name="composetest" \
     commit -am 'modifications for tests'
   popd
+
   popd
 fi
 
 echo "Running ${#tests[*]} tests ${JOBS} at a time"
 
-outputdir="${topsrcdir}/compose-logs"
-fixtures="$(pwd)/compose-cache"
 echo "Test results outputting to ${outputdir}/"
 
 echo -n "${tests[*]}" | parallel -d' ' -j "${JOBS}" --line-buffer \
