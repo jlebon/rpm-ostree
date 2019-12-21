@@ -105,7 +105,7 @@ runvm() {
 
     #shellcheck disable=SC2086
     qemu-kvm \
-        -nodefaults -nographic -m 1536 -no-reboot -cpu host \
+        -nodefaults -nographic -m 2048 -no-reboot -cpu host \
         -kernel "${fixtures}/supermin.build/kernel" \
         -initrd "${fixtures}/supermin.build/initrd" \
         -netdev user,id=eth0,hostname=supermin \

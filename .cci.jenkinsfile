@@ -106,7 +106,7 @@ parallel vmcheck: {
 },
 compose: {
     def jobs = 5
-    def mem = (jobs * 1536) + 512
+    def mem = (jobs * 2048) + 512
     coreos.pod(image: COSA_IMAGE, runAsUser: 0, emptyDirs: ["/srv/tmpdir"], kvm: true, memory: "${mem}Mi", cpu: "${jobs}") {
         checkout scm
         unstash 'rpms'
