@@ -1,6 +1,6 @@
 @Library('github.com/jlebon/coreos-ci-lib@coreos-ci') _
 
-cosaPod {
+cosaPod() {
   sh "echo hello world"
   fcosBuild
 }
