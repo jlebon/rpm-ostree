@@ -1,7 +1,6 @@
 @Library('github.com/jlebon/coreos-ci-lib@coreos-ci') _
 
 cosaPod {
-  sh "echo hello world"
-  echo "${fcosBuild.getClass()}"
-  fcosBuild()
+  checkout scm
+  fcosBuild(overlays: ["rootfs/"], make: true)
 }
