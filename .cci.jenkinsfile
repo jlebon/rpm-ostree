@@ -1,9 +1,6 @@
 @Library('github.com/jlebon/coreos-ci-lib@coreos-ci') _
 
-COSA_IMAGE = 'quay.io/coreos-assembler/coreos-assembler:latest'
-
-stage("Build") {
-  coreospod(image: COSA_IMAGE, coreosci: true) {
-    fcosBuild
-  }
+cosaPod {
+  sh "echo hello world"
+  fcosBuild
 }
