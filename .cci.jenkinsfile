@@ -1,5 +1,3 @@
-@Library('github.com/jlebon/coreos-ci-lib@coreos-ci') _
-
 cosaPod {
   checkout scm
   fcosBuild(overlays: ["rootfs/"], make: true)
