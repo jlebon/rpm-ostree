@@ -2,8 +2,11 @@
 
 COSA_IMAGE = 'quay.io/coreos-assembler/coreos-assembler:latest'
 
-stage("Build") {
-  coreos.pod(image: COSA_IMAGE, coreosci: true) {
-    this.fcosBuild()
-  }
-}
+def z = new com.coreos.CoreOS()
+z.blabla("asdf")
+
+//stage("Build") {
+//  coreos.pod(image: COSA_IMAGE, coreosci: true) {
+//    this.fcosBuild()
+//  }
+//}
