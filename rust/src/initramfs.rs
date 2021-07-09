@@ -30,6 +30,7 @@ fn list_files_recurse<P: glib::IsA<gio::Cancellable>>(
     if let Some(c) = cancellable {
         let _ = c.set_error_if_cancelled()?;
     }
+    filelist.insert(path.to_string());
     let meta = d.metadata(path).context("stat")?;
     match meta.simple_type() {
         SimpleType::Symlink | SimpleType::File => {}
@@ -43,7 +44,6 @@ fn list_files_recurse<P: glib::IsA<gio::Cancellable>>(
         }
         _ => anyhow::bail!("Invalid non-regfile/symlink/directory: {}", path),
     }
-    filelist.insert(path.to_string());
     Ok(())
 }
 
