@@ -14,7 +14,7 @@ use std::io;
 use std::io::prelude::*;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::io::IntoRawFd;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::rc;
 use subprocess::Exec;
@@ -30,7 +30,22 @@ fn list_files_recurse<P: glib::IsA<gio::Cancellable>>(
     if let Some(c) = cancellable {
         let _ = c.set_error_if_cancelled()?;
     }
-    filelist.insert(path.to_string());
+
+    // We need to include all the directories leading up to the path because cpio doesn't do that,
+    // and the kernel at extraction time won't create missing leading dirs. But this also serves
+    // as validating that the path is canonical and doesn't do e.g. /etc/foo/../bar.
+    let mut path_rebuilt = PathBuf::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(c) => {
+                path_rebuilt.push(c);
+                // safe to unwrap here since it's all built up of components of a known UTF-8 path
+                filelist.insert(path_rebuilt.to_str().unwrap().into());
+            }
+            _ => anyhow::bail!("Invalid path {}: must be canonical", path),
+        }
+    }
+
     let meta = d.metadata(path).context("stat")?;
     match meta.simple_type() {
         SimpleType::Symlink | SimpleType::File => {}
