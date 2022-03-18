@@ -750,6 +750,13 @@ impl Treefile {
             .unwrap_or_default()
     }
 
+    pub(crate) fn set_packages_override_remove(&mut self, packages: &Vec<String>) {
+        let _ = self.parsed.derive.override_remove.take();
+        if !packages.is_empty() {
+            self.parsed.derive.override_remove = Some(packages.clone());
+        }
+    }
+
     pub(crate) fn get_packages_override_replace_local(&self) -> Vec<String> {
         self.parsed
             .derive
@@ -758,6 +765,21 @@ impl Treefile {
             .flatten()
             .map(|(k, v)| format!("{}:{}", v, k))
             .collect()
+    }
+
+    pub(crate) fn get_packages_override_replace_local_rpms(&self) -> Vec<String> {
+        self.parsed
+            .derive
+            .override_replace_local_rpms
+            .clone()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn set_packages_override_replace_local_rpms(&mut self, packages: &Vec<String>) {
+        let _ = self.parsed.derive.override_replace_local_rpms.take();
+        if !packages.is_empty() {
+            self.parsed.derive.override_replace_local_rpms = Some(packages.clone());
+        }
     }
 
     pub(crate) fn get_exclude_packages(&self) -> Vec<String> {
@@ -1027,6 +1049,25 @@ impl Treefile {
         let target = Path::new(COMPOSE_JSON_PATH);
         rootfs_dfd.ensure_dir_all(target.parent().unwrap(), 0o755)?;
         rootfs_dfd.write_file_contents(target, 0o644, self.serialized.as_bytes())?;
+        Ok(())
+    }
+
+    pub(crate) fn validate_for_container(&self) -> Result<()> {
+        // this should've already been checked, but just in case
+        self.parsed.base.error_if_nonempty()?;
+        // this is pretty wasteful but it allows us to make this an opt-in, instead of an opt-out
+        // and avoid regressing if we add more fields in the future
+        let mut clone = self.parsed.derive.clone();
+        // neuter everything we *do* support
+        clone.override_remove.take();
+        clone.override_replace_local_rpms.take();
+        if clone != Default::default() {
+            let j = serde_json::to_string_pretty(&clone)?;
+            bail!(
+                "the following non-container derivation fields are not supported:\n{}",
+                j
+            );
+        }
         Ok(())
     }
 }
@@ -1690,7 +1731,7 @@ pub(crate) struct LegacyTreeComposeConfigFields {
     pub(crate) automatic_version_prefix: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct DeriveCustom {
     pub(crate) url: String,
@@ -1698,7 +1739,7 @@ pub(crate) struct DeriveCustom {
     pub(crate) description: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct DeriveInitramfs {
     pub(crate) regenerate: bool,
@@ -1711,7 +1752,7 @@ pub(crate) struct DeriveInitramfs {
 /// These fields are only useful when deriving from a prior ostree commit;
 /// at the moment we only use them when translating an origin file
 /// to a treefile for client side assembly.
-#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Default, PartialEq, Eq, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct DeriveConfigFields {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1726,6 +1767,8 @@ pub(crate) struct DeriveConfigFields {
     pub(crate) override_remove: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) override_replace_local: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) override_replace_local_rpms: Option<Vec<String>>,
 
     // Initramfs
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2947,7 +2990,6 @@ pub(crate) fn treefile_new_client_from_etc(basearch: &str) -> CxxResult<Box<Tree
     for tf in tfs {
         let new_cfg = treefile_parse_and_process(tf, basearch)?;
         new_cfg.config.base.error_if_nonempty()?;
-        new_cfg.config.derive.error_if_nonempty()?;
         new_cfg.externals.assert_empty();
         let mut new_cfg = new_cfg.config;
         treefile_merge(&mut new_cfg, &mut cfg);

@@ -21,6 +21,7 @@
 #include "config.h"
 
 #include <glib-unix.h>
+#include <libdnf/libdnf.h>
 #include <string.h>
 
 #include "rpmostree-core.h"
@@ -33,6 +34,8 @@ gboolean
 rpmostree_container_rebuild (rpmostreecxx::Treefile &treefile, GCancellable *cancellable,
                              GError **error)
 {
+  CXX_TRY (treefile.validate_for_container (), error);
+
   g_autoptr (RpmOstreeContext) ctx = rpmostree_context_new_container ();
   rpmostree_context_set_treefile (ctx, treefile);
 
@@ -46,6 +49,9 @@ rpmostree_container_rebuild (rpmostreecxx::Treefile &treefile, GCancellable *can
     return FALSE;
 
   DnfContext *dnfctx = rpmostree_context_get_dnf (ctx);
+  DnfTransaction *t = dnf_context_get_transaction (dnfctx);
+  guint64 flags = dnf_transaction_get_flags (t);
+  dnf_transaction_set_flags (t, flags | DNF_TRANSACTION_FLAG_ALLOW_DOWNGRADE);
 
   /* can't use cancellable here because it wants to re-set it on the state,
    * which will trigger an assertion; XXX: tweak libdnf */
