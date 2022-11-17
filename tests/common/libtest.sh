@@ -261,7 +261,7 @@ EOF
         --define "_rpmdir $test_tmpdir/yumrepo/packages" \
         --define "_buildrootdir $PWD")
     # use --keep-all-metadata to retain previous updateinfo
-    (cd $test_tmpdir/yumrepo &&
+    (set -x; cd $test_tmpdir/yumrepo &&
      createrepo_c --no-database --update --keep-all-metadata .)
     # convenience function to avoid follow-up add-pkg
     if [ -n "$uinfo" ]; then

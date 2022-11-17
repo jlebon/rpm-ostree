@@ -40,7 +40,13 @@ jobs:
   build-tests:
     name: "Build Integration Test Data"
     runs-on: ubuntu-latest
-    container: registry.ci.openshift.org/coreos/fcos-buildroot:testing-devel
+    container:
+      image: registry.ci.openshift.org/coreos/fcos-buildroot:testing-devel
+      # Run privileged to hack around createrepo_c hitting the classic seccomp
+      # broken behaviour of returning EPERM instead of ENOSYS. We can probably
+      # drop this once `ubuntu-latest` has new enough moby to fix
+      # https://github.com/moby/moby/pull/42681.
+      options: "--user root --privileged"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2

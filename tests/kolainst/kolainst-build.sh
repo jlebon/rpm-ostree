@@ -19,6 +19,7 @@ repover=0
 mkdir ${test_tmpdir}/rpm-repos/${repover}
 # The obligatory `foo` and `bar` packages
 build_rpm foo version 1.2 release 3
+GDB='gdb -ex continue -ex "t a a bt" --args'
 build_rpm bar
 build_rpm baz
 build_rpm baz version 2.0
