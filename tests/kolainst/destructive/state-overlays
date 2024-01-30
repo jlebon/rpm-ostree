@@ -31,12 +31,16 @@ case "${AUTOPKGTEST_REBOOT_MARK:-}" in
       rpm-ostree override replace https://bodhi.fedoraproject.org/updates/FEDORA-2024-6c7480dd2f
     fi
 
-    # FCOS doesn't enable opt-usrlocal-overlays so use the hack instead
-    mkdir -p /etc/systemd/system/rpm-ostreed.service.d/
-    cat > /etc/systemd/system/rpm-ostreed.service.d/state-overlay.conf <<EOF
+    # FCOS doesn't enable opt-usrlocal-overlays yet. It's on in Prow CI though.
+    # Just check the treefile so we do the right thing regardless of CoreOS CI
+    # or Prow.
+    if ! jq -e '.["opt-usrlocal-overlays"]' /usr/share/rpm-ostree/treefile.json; then
+      mkdir -p /etc/systemd/system/rpm-ostreed.service.d/
+      cat > /etc/systemd/system/rpm-ostreed.service.d/state-overlay.conf <<EOF
 [Service]
 Environment=RPMOSTREE_EXPERIMENTAL_FORCE_OPT_USRLOCAL_OVERLAY=1
 EOF
+    fi
 
     # This script itself is in /usr/local, so we need to move it back on top
     # of the overlay. This simultaneously demos one way upgrading nodes could
