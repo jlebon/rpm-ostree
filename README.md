@@ -1,5 +1,6 @@
 # rpm-ostree: A true hybrid image/package system
 
+
 rpm-ostree is a hybrid image/package system.  It combines
 [libostree](https://ostree.readthedocs.io/en/latest/) as a base image format,
 and accepts RPM on both the client and server side, sharing code with the
